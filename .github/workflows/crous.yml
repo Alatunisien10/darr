@@ -1,0 +1,53 @@
+name: Surveillance logements CROUS
+
+# Se déclenche automatiquement toutes les 15 min, et permet aussi un
+# lancement manuel depuis l'onglet Actions du dépôt.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+# Nécessaire pour que le job puisse recommiter le fichier d'état crous_state.json.
+permissions:
+  contents: write
+
+# Empêche deux exécutions de tourner en même temps (évite les conflits de commit).
+concurrency:
+  group: crous-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install requests beautifulsoup4
+
+      - name: Vérifier les logements
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python crous_watch.py --once
+
+      - name: Sauvegarder l'état (commit)
+        run: |
+          if [[ -n "$(git status --porcelain crous_state.json)" ]]; then
+            git config user.name "crous-bot"
+            git config user.email "crous-bot@users.noreply.github.com"
+            git add crous_state.json
+            git commit -m "MàJ état CROUS [skip ci]"
+            git push
+          else
+            echo "Aucun changement d'état."
+          fi
